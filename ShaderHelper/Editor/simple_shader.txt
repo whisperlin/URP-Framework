@@ -32,36 +32,36 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
             #pragma prefer_hlslcc gles
             #pragma exclude_renderers d3d11_9x
             #pragma target 2.0
-			#define _NORMALMAP
+
+			//#define _NORMALMAP 1
             // -------------------------------------
             // Material Keywords
-            /*
-			#pragma shader_feature _NORMALMAP
-            #pragma shader_feature _ALPHATEST_ON
-            #pragma shader_feature _ALPHAPREMULTIPLY_ON
-            #pragma shader_feature _EMISSION
-            #pragma shader_feature _METALLICSPECGLOSSMAP
-            #pragma shader_feature _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
-            #pragma shader_feature _OCCLUSIONMAP
+            //#pragma shader_feature _NORMALMAP
+            //#pragma shader_feature _ALPHATEST_ON
+            //#pragma shader_feature _ALPHAPREMULTIPLY_ON
+            //#pragma shader_feature _EMISSION
+            //#pragma shader_feature _METALLICSPECGLOSSMAP
+            //#pragma shader_feature _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            //#pragma shader_feature _OCCLUSIONMAP
 
-            #pragma shader_feature _SPECULARHIGHLIGHTS_OFF
-            #pragma shader_feature _ENVIRONMENTREFLECTIONS_OFF
-            #pragma shader_feature _SPECULAR_SETUP
+            //#pragma shader_feature _SPECULARHIGHLIGHTS_OFF
+            //#pragma shader_feature _ENVIRONMENTREFLECTIONS_OFF
+            //#pragma shader_feature _SPECULAR_SETUP
+
             #pragma shader_feature _RECEIVE_SHADOWS_OFF
 
             // -------------------------------------
             // Universal Pipeline keywords
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS_CASCADE
-            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
-            #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
+            //#pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            //#pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
             #pragma multi_compile _ _SHADOWS_SOFT
-            #pragma multi_compile _ _MIXED_LIGHTING_SUBTRACTIVE
+            //#pragma multi_compile _ _MIXED_LIGHTING_SUBTRACTIVE
 
             // -------------------------------------
             // Unity defined keywords
-            #pragma multi_compile _ DIRLIGHTMAP_COMBINED
-			*/
+            //#pragma multi_compile _ DIRLIGHTMAP_COMBINED*/
             #pragma multi_compile _ LIGHTMAP_ON
             #pragma multi_compile_fog
 
@@ -75,7 +75,8 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ShaderGraphFunctions.hlsl"
 			#include "Packages/com.unity.shadergraph/ShaderGraphLibrary/ShaderVariablesFunctions.hlsl"
 
- 
+			//这句不能在前面，否则，球协关照很诡异的没了。
+			#define _NORMALMAP 1
 			#pragma vertex vert
 			#pragma fragment frag
  
@@ -109,9 +110,13 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
 					float2 uv :TEXCOORD0;
 					DECLARE_LIGHTMAP_OR_SH(lightmapUV, vertexSH, 1);
 					float3 normalWS :TEXCOORD2;
+					float3 positionWS:TEXCOORD3;
 					#ifdef _NORMALMAP
-						float3 tangentWS:TEXCOORD3;
-						float3 bitangentWS:TEXCOORD4;
+						float3 tangentWS:TEXCOORD4;
+						float3 bitangentWS:TEXCOORD5;
+					#endif
+					#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
+						float4 shadowCoord              : TEXCOORD7;
 					#endif
 
 			};
@@ -122,7 +127,8 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
 				o.uv =  i.uv ;
 				o.positionCS = TransformObjectToHClip(i.positionOS);
 				
-				//float3 positionWS = TransformObjectToWorld(i.positionOS.xyz);
+				o.positionWS = TransformObjectToWorld(i.positionOS.xyz);
+				
 				//float3 normalWS = TransformObjectToWorldNormal(i.normalOS);
 				VertexNormalInputs normalInput = GetVertexNormalInputs(i.normalOS, i.tangentOS);
 			#ifdef _NORMALMAP
@@ -135,6 +141,11 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
 			#endif
 				OUTPUT_LIGHTMAP_UV(i.lightmapUV, unity_LightmapST, o.lightmapUV);
 				OUTPUT_SH(o.normalWS.xyz, o.vertexSH);
+
+				#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
+					o.shadowCoord = GetShadowCoord(i);
+				#endif
+
 	
 				return o;
 			}
@@ -144,7 +155,11 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
 			/*#if !LIGHTMAP_ON
  
 				return float4(i.vertexSH.xyz,1);
-			#endif*/
+			#endif
+
+				#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
+					return half4(1,0,0,1);
+				#endif*/
 		
 			#ifdef _NORMALMAP
 				half4 _n = SAMPLE_TEXTURE2D(_BumpMap,sampler_BumpMap,TRANSFORM_TEX(i.uv,_BumpMap)  );
@@ -154,11 +169,23 @@ Shader "Lin/URP/SimplesUnlitShader [#index]" //[$index]
 			#else
 				half3 normalWorld = NormalizeNormalPerPixel(i.normalWS);
 			#endif
+
+
 			half3 lightColor = _MainLightColor.rgb;
 			half3 lightDirection = normalize(_MainLightPosition.xyz);
+
+			#if defined(MAIN_LIGHT_CALCULATE_SHADOWS)
+			half4 shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+			half shadowAttenuation = MainLightRealtimeShadow(shadowCoord);
+			lightColor.xyz*=shadowAttenuation;
+			//return float4(shadowAttenuation,0,0,1);
+			#endif
+
+			
 			half ndotl = saturate(dot(lightDirection,normalWorld));
 			half4 mainTex = SAMPLE_TEXTURE2D(_BaseMap,sampler_BaseMap,TRANSFORM_TEX(i.uv,_BaseMap)  );
-			half4 c = _Color * mainTex *ndotl;
+			half4 c = _Color * mainTex ;
+			c.rgb=c.rgb*( lightColor.rgb*ndotl    + i.vertexSH.xyz);
 			return c;
 		}
 
