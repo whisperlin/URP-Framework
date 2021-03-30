@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
@@ -25,10 +25,11 @@ public class ShaderHelper
         string txt = File.ReadAllText(plugins_path + fileName+ ".txt");
         for (int i = 0; ; i++)
         {
-            string full_path = path + @"\"+ fileName + i + ".shader";
+            string full_path = path + @"\"+ fileName + "_"+i + ".shader";
             if (!File.Exists(full_path))
             {
                 txt = txt.Replace("[#index]", i.ToString());
+                txt = txt.Replace("[$index]", "[#index]");
                 File.WriteAllText(full_path, txt);
                 AssetDatabase.ImportAsset(full_path);
                 break;
